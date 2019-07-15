@@ -1,20 +1,36 @@
+import configparser
 import csv
-import xmltodict as xml
-import urllib.request
+import os
 import json
+
+import urllib.request
+import xmltodict as xml
+
 from termcolor import colored
 
-in_file = './in.csv'
 
-store_ids = [215, 211]
-store_names = []
-country_code = 'us'
-language_code = 'en'
+config = configparser.ConfigParser()
+config.read('../config.ini')
 
-availability_base_url = 'https://www.ikea.com/' + country_code + '/' + language_code +'/iows/catalog/availability/'
-product_base_url = 'https://www.ikea.com/' + country_code + '/' + language_code + '/catalog/products/' 
+try:
+    store_ids = config['CONFIG']['IKEA_STORES']
+except KeyError:
+    store_ids = [215, 211]
+try:
+    country_code = config['CONFIG']['IKEA_COUNTRY_CODE']
+except KeyError:
+    country_code = 'us'
+try:
+    language_code = config['CONFIG']['IKEA_LANG_CODE']
+except KeyError:
+    language_code = 'en'
+
+availability_base_url = "https://www.ikea.com/{}/{}/iows/catalog/availability/".format(country_code, language_code)
+product_base_url = "https://www.ikea.com/{}/{}/catalog/products/".format(country_code, language_code)
 product_url_suffix = '?version=v1&type=xml&dataset=normal,prices,parentCategories,allImages,attributes'
 
+
+store_names = []
 product_info = []
 product_availability = []
 
@@ -22,7 +38,7 @@ product_availability = []
 '''
 Reads the preferred store codes and country/language codes
 '''
-def load_preferred_stores():
+def load_preferred_stores(verbose):
     # Load the preferred stores file
     with open('preferred_stores.json') as f:
         data = json.load(f)
@@ -34,7 +50,7 @@ def load_preferred_stores():
         language_code = data['language']
 
     # Get the store names
-    with open('stores.json') as f:
+    with open('stores.json', encoding='utf8') as f:
         data = json.load(f)
 
         global store_names
@@ -44,9 +60,10 @@ def load_preferred_stores():
                 if int(d['buCode']) == i:
                     store_names.append({'id': i, 'name': d['name']})
 
-    print('Searching at the following store(s):')
-    for n in store_names:
-        print(n['name'] + ' (' + str(n['id']) + ')')
+    if verbose:
+        print('Searching at the following store(s):')
+        for n in store_names:
+            print(n['name'] + ' (' + str(n['id']) + ')')
 
 
 '''
@@ -68,7 +85,7 @@ Reads the input CSV file
 
 Returns: An array of dictionaries [{'id': '01234567', 'qty': 1, 'notes':'blah'}]
 '''
-def load_input_CSV():
+def load_input_CSV(in_file):
     out = []
     with open(in_file) as csvFile:
         reader = csv.reader(csvFile, delimiter=',')
@@ -100,7 +117,7 @@ Inputs:
 Returns: A dict with the product info 
     e.g. {'item_id':'01234567', 'price':229.0, 'color':'white', 'description':'EXAMPLE product', 'size':'1x1 "'}
 '''
-def get_product_info(item_id):
+def get_product_info(item_id, verbose):
     global product_info
 
     # If we already got info for this product, return it
@@ -108,7 +125,7 @@ def get_product_info(item_id):
         if prod['item_id'] == item_id:
             return prod
 
-    url = product_base_url + item_id + product_url_suffix
+    url = "{}{}{}".format(product_base_url,item_id,product_url_suffix)
     data = urllib.request.urlopen(url).read()
     data = xml.parse(data)
     # pretty_print(data)
@@ -134,8 +151,8 @@ def get_product_info(item_id):
             item_info['size'] = item['attributesItems']['attributeItem'][1]['value']
         except:
             item_info['size'] = ''
-
-        print('\nProduct', item_info['item_id'], item_info['description'])
+        if verbose:
+            print('\nProduct', item_info['item_id'], item_info['description'])
 
         # Save for later
         product_info.append(item_info)
@@ -162,7 +179,7 @@ Input:
 
 Returns: a list of dictionaries containing item availability
 '''
-def get_product_availability(item_id):
+def get_product_availability(item_id, verbose):
     global product_availability
 
     # If we already got availability for this product, return it
@@ -192,7 +209,10 @@ def get_product_availability(item_id):
                 store_dict['item_id'] = item_id
                 store_dict['available'] = int(stock['availableStock'])
                 if store_dict['available'] == 0:
-                    store_dict['restockDate'] = stock['restockDate']
+                    try:
+                        store_dict['restockDate'] = stock['restockDate']
+                    except KeyError:
+                        store_dict['restorDate'] = "N/A"
                 store_dict['probability'] = stock['inStockProbabilityCode']
                 store_dict['isMultiProduct'] = str_to_bool(stock['isMultiProduct'])
 
@@ -210,19 +230,34 @@ def get_product_availability(item_id):
                 store_dict['locations'] = locations
 
                 # forecast
-                store_dict['forecast'] = stock['forecasts']['forcast']
+                try:
+                    store_dict['forecast'] = stock['forecasts']['forcast']
+                except KeyError:
+                    store_dict['forcast'] = None
 
                 out.append(store_dict)
 
                 # print the status to the terminal
                 confcolor = color_confidence(store_dict['probability'])
-                print('At store:', store_dict['store_name'], 'Qty:', colored(store_dict['available'], confcolor), 'In-Stock Confidence:', colored(store_dict['probability'], confcolor))
-                if store_dict['available'] == 0:
-                    print('Restock date:', store_dict['restockDate'])
-                    print('Forecast:')
-                    for f in store_dict['forecast']:
-                        confcolor = color_confidence(f['inStockProbabilityCode'])
-                        print(f['validDate'], 'Qty:', colored(f['availableStock'], confcolor), 'Confidence:', colored(f['inStockProbabilityCode'])) 
+                if verbose:
+                    print('At store: {}\n'.format(store_dict['store_name'])
+                            + 'Qty: {}\n'.format(colored(store_dict['available'], confcolor))
+                            + 'In-Stock Confidence: {}\n'.format(colored(store_dict['probability'], confcolor))
+                    )
+                    if store_dict['available'] == 0:
+                        try:
+                            restock_date = store_dict['restockDate']
+                        except KeyError:
+                            restock_date = "N/A"
+                            print('Restock date: {}'.format(restock_date))
+                            print('Forecast:')
+                            try:
+                                for f in store_dict['forecast']:
+                                    confcolor = color_confidence(f['inStockProbabilityCode'])
+                                    print(f['validDate'], 'Qty:', colored(f['availableStock'], confcolor), 'Confidence:', colored(f['inStockProbabilityCode']))
+                            except KeyError:
+                                    print("Item no longer in catalog!")
+
 
     # Save for later
     product_availability.append(out)
@@ -305,17 +340,16 @@ Loads and parses all products
 
 Returns [dict]: A list of products
 '''
-def load_parse_all_products():
+def load_parse_all_products(items, verbose):
     products = []
-    items = load_input_CSV()
     for item in items:
         # Get product info
         product = {}
         product['id'] = item['id']
         product['qty_needed'] = item['qty']
         product['notes'] = item['notes']
-        product['info'] = get_product_info(item['id'])
-        product['availability'] = get_product_availability(item['id'])
+        product['info'] = get_product_info(item['id'], verbose)
+        product['availability'] = get_product_availability(item['id'], verbose)
         
         products.append(product)
 
@@ -388,7 +422,7 @@ def save_file(filename, rows):
 '''
 Gets product info and availability and exports to CSV files
 '''
-def save_product_availability(products):
+def save_product_availability(products, verbose):
     total_price = calc_total_price(products)
     stock_confidence = get_stock_confidence(products)
     # pretty_print(products)
@@ -467,7 +501,7 @@ def save_product_availability(products):
                             notes2 = 'Part of ' + prod['id']
 
                             info = get_product_info(loc['partNumber'])
-                            avail = get_product_availability(loc['partNumber'])
+                            avail = get_product_availability(loc['partNumber'], verbose)
                             for thisstore in avail:
                                 if thisstore['store_id'] == store:
                                     avail = thisstore
@@ -493,8 +527,16 @@ def save_product_availability(products):
         rows.insert(3, ['Meets Qty Reqs', meets_qty_reqs])
 
         save_file('out_' + str(store_name) + '.csv', rows)
-    print(colored('\nDone.', 'green'))
+    if verbose:
+        print(colored('\nDone.', 'green'))
 
-load_preferred_stores()
-products = load_parse_all_products()
-save_product_availability(products)
+
+def get(items, verbose):
+    load_preferred_stores(verbose)
+    products = load_parse_all_products(items, verbose)
+    save_product_availability(products, verbose)
+
+
+if __name__ == "__main__":
+    items = load_input_CSV('../in.csv')
+    get(items, verbose=True)
