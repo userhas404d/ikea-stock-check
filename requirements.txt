@@ -1,3 +1,4 @@
-xmltodict
-termcolor
+bs4
 click
+termcolor
+xmltodict

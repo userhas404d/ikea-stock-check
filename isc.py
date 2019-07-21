@@ -76,8 +76,7 @@ def config(verbose, store_list, country, language):
     default='us',
     help='Required to validate your store code if the store is located outside the US',
     show_default=True)
-@click.option('-v', '--verbose', is_flag=True, help='Enables verbose mode')
-def get_stores(verbose, country):
+def get_stores(country):
     """
     Prints a list of stores for the target country.
     """
@@ -86,12 +85,10 @@ def get_stores(verbose, country):
     country_codes = stores.list_country_codes(store_map)
 
     if country not in country_codes:
-        if verbose: 
             click.echo('\nERROR - country code: {} is not a valid country code.\n'.format(country))
             click.echo('Check your country code by looking at the Ikea URL of your target country')
             click.echo("For example, in the U.S. the URL is https://www.ikea.com/us/en/ and the country code is \'us\'\n")
     else:
-        if verbose: 
             click.echo(
                 json.dumps(stores.get(loc=country,store_map=store_map),
                 indent=4, sort_keys=True))
