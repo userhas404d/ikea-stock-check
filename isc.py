@@ -22,16 +22,20 @@ def main():
 @click.argument('store_list')
 @click.option('--country', 
     default='us',
-    help='Target country')
+    help='Target country',
+    show_default=True)
 @click.option('--language',
     default='en',
-    help='Language')
+    help='Language',
+    show_default=True)
 @click.option('-v', '--verbose', is_flag=True, help='Enables verbose mode')
 def config(verbose, store_list, country, language):
     """
     Sets the target store(s) to search.
+
     Accepts a comma separate list of stores.
-    Example: iks.py set-stores 119,117
+
+    Example: isc.py set-stores 119,117
     """
     config = configparser.ConfigParser()
     config['CONFIG'] = {}
@@ -66,15 +70,16 @@ def config(verbose, store_list, country, language):
     f = open("config.ini", "+w")
     config.write(f)
 
+
 @main.command()
 @click.option('--country',
     default='us',
-    help='Required to validate your store code if the store is located outside the US')
+    help='Required to validate your store code if the store is located outside the US',
+    show_default=True)
 @click.option('-v', '--verbose', is_flag=True, help='Enables verbose mode')
 def get_stores(verbose, country):
     """
     Prints a list of stores for the target country.
-    Must be a valid contry code.
     """
 
     store_map="stores.json"
@@ -96,14 +101,17 @@ def get_stores(verbose, country):
 @click.argument('home_planner_file', type=click.Path(exists=True))
 @click.option('--output-path', '-p',
                 default="planner_items.csv",
-                help='Path of the parsed home planner output.')
+                help='Path of the parsed home planner output.',
+                show_default=True)
 @click.option('--output-type', '-t',
                 default="csv",
-                help='Content type of the parsed home planner output.')
+                help='Content type of the parsed home planner output.',
+                show_default=True)
 @click.option('-v', '--verbose', is_flag=True, help='Enables verbose mode')
 def parse_home_planner(verbose, home_planner_file, output_path, output_type):
     """
     Returns a Ikea Stock Checker list of items provided a home planner html document.
+
     At the time of writing this document is located in: 'IKEA Home Planner_files/VPUISummary.html'
     """
     items = home_planner.parse(home_planner_file)
@@ -120,28 +128,45 @@ def parse_home_planner(verbose, home_planner_file, output_path, output_type):
 @click.argument('stock_list', type=click.Path(exists=True))
 @click.option('-v', '--verbose', is_flag=True, help='Enables verbose mode')
 def stock_check(verbose, stock_list):
-    """Checks if list of provided items are in stock"""
+    """
+    Checks if list of provided items are in stock
+    """
     items = check_stock.load_input_CSV(stock_list)
     check_stock.get(items, verbose)
 
 
-
 @main.command()
 @click.argument('stock_list', type=click.Path(exists=True))
+@click.option('--config-path',
+                default='config.ini',
+                help='Path to the configuration file',
+                show_default=True)
 @click.option('-v', '--verbose', is_flag=True, help='Enables verbose mode')
-def add_to_shopping_list(verbose, stock_list):
-    if verbose:
-        click.echo(stock_list)
+def add_to_shopping_list(verbose, config_path, stock_list):
+    """
+    Adds the provided item list to a target shopping list.
+    Requires config.ini to be configured properly.
+    
+    See the README for more details.
+    """
+
+    config = configparser. RawConfigParser()
+    config.read(config_path)
+    # check if target config file has been populated
+    for secret in config['SECRET']:
+            if not config['SECRET'][secret]:
+                click.echo('\nERROR: {} not set in config.ini\n'.format(secret))
 
 
-#         home_planner.write_csv(contents, output)
-#     if stock_list and ikea_list_id:
-#         if not os.environ.get('IKEA_SESSION_COOKIE'):
-#             print('Session Cookie env var not set!')
-#         else:
-#             os.environ['IKEA_LIST_ID'] = ikea_list_id
-#             items = check_stock.load_input_CSV(stock_list)
-#             add_to_list.add_all(items)
+    item_list = check_stock.load_input_CSV(stock_list)
+    try:
+        if not add_to_list.add_all(item_list, config, verbose):
+            click.echo('\nERROR: Error ocurred server side when adding item to list.'
+            +'\nPlease confirm the values in config.ini are correct\n')
+    except KeyError:
+        click.echo('\nERROR: config.ini has not been populated properly.'
+                    +'\n\nPlease re-run \'ics.py config\' and try again.\n')
+
 
 if __name__ == '__main__':
     main()
