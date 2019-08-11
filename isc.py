@@ -35,7 +35,7 @@ def config(verbose, store_list, country, language):
 
     Accepts a comma separate list of stores.
 
-    Example: isc.py set-stores 119,117
+    Example: isc.py config 119,117
     """
     config = configparser.ConfigParser()
     config['CONFIG'] = {}

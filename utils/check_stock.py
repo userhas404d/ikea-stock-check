@@ -36,37 +36,6 @@ product_availability = []
 
 
 '''
-Reads the preferred store codes and country/language codes
-'''
-def load_preferred_stores(verbose):
-    # Load the preferred stores file
-    with open('preferred_stores.json') as f:
-        data = json.load(f)
-
-        global store_ids, country_code, language_code
-
-        store_ids = data['stores']
-        country_code = data['country']
-        language_code = data['language']
-
-    # Get the store names
-    with open('stores.json', encoding='utf8') as f:
-        data = json.load(f)
-
-        global store_names
-
-        for i in store_ids:
-            for d in data:
-                if int(d['buCode']) == i:
-                    store_names.append({'id': i, 'name': d['name']})
-
-    if verbose:
-        print('Searching at the following store(s):')
-        for n in store_names:
-            print(n['name'] + ' (' + str(n['id']) + ')')
-
-
-'''
 Gets the store name from the store ID
 
 Inputs:
@@ -532,7 +501,6 @@ def save_product_availability(products, verbose):
 
 
 def get(items, verbose):
-    load_preferred_stores(verbose)
     products = load_parse_all_products(items, verbose)
     save_product_availability(products, verbose)
 
