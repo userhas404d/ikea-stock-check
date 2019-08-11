@@ -1,6 +1,5 @@
 import configparser
 import csv
-import os
 import json
 
 import urllib.request
@@ -9,9 +8,9 @@ import xmltodict as xml
 from termcolor import colored
 
 
+# load the config
 config = configparser.ConfigParser()
 config.read('../config.ini')
-
 try:
     store_ids = config['CONFIG']['IKEA_STORES']
 except KeyError:
@@ -25,9 +24,19 @@ try:
 except KeyError:
     language_code = 'en'
 
-availability_base_url = "https://www.ikea.com/{}/{}/iows/catalog/availability/".format(country_code, language_code)
-product_base_url = "https://www.ikea.com/{}/{}/catalog/products/".format(country_code, language_code)
-product_url_suffix = '?version=v1&type=xml&dataset=normal,prices,parentCategories,allImages,attributes'
+
+# set defaults
+availability_base_url = ('https://www.ikea.com/'
+                         + '{}'.format(country_code)
+                         + '/'
+                         + '{}'.format(language_code)
+                         + '/iows/catalog/availability/'
+                         )
+product_base_url = ('https://www.ikea.com/{}/'.format(country_code)
+                    + '{}/catalog/products/'.format(language_code)
+                    )
+product_url_suffix = ('?version=v1&type=xml&dataset=normal,'
+                      + 'prices,parentCategories,allImages,attributes')
 
 
 store_names = []
@@ -35,26 +44,49 @@ product_info = []
 product_availability = []
 
 
-'''
-Gets the store name from the store ID
+def load_store_names(verbose):
+    '''
+    Reads the preferred store codes and country/language codes
+    '''
 
-Inputs:
-    store_id int: The store ID
+    # Get the store names
+    with open('stores.json', encoding='utf8') as f:
+        data = json.load(f)
 
-Returns: The store name
-'''
+        global store_names
+
+        for i in store_ids:
+            for d in data:
+                if int(d['buCode']) == i:
+                    store_names.append({'id': i, 'name': d['name']})
+
+    if verbose:
+        print('Searching at the following store(s):')
+        for n in store_names:
+            print(n['name'] + ' (' + str(n['id']) + ')')
+
+
 def get_store_name(store_id):
+    '''
+    Gets the store name from the store ID
+
+    Inputs:
+        store_id int: The store ID
+
+    Returns: The store name
+    '''
     for n in store_names:
         if n['id'] == store_id:
             return n['name']
 
 
-'''
-Reads the input CSV file
-
-Returns: An array of dictionaries [{'id': '01234567', 'qty': 1, 'notes':'blah'}]
-'''
 def load_input_CSV(in_file):
+    '''
+    Reads the input CSV file
+
+    Returns: An array of dictionaries
+    [{'id': '01234567', 'qty': 1, 'notes':'blah'}]
+    '''
     out = []
     with open(in_file) as csvFile:
         reader = csv.reader(csvFile, delimiter=',')
@@ -63,11 +95,11 @@ def load_input_CSV(in_file):
             if count > 0:
                 # Process the rows to a dict
                 if row[1] == '':
-                    qty = 1;
+                    qty = 1
                 else:
                     qty = int(row[1])
                 this_item = {
-                    "id": row[0].replace(".",""),
+                    "id": row[0].replace(".", ""),
                     "qty": qty,
                     "notes": row[2]
                 }
@@ -77,16 +109,23 @@ def load_input_CSV(in_file):
     return out
 
 
-'''
-Gets the product color, description, size, and price
-
-Inputs:
-    item_id string: The item id
-
-Returns: A dict with the product info 
-    e.g. {'item_id':'01234567', 'price':229.0, 'color':'white', 'description':'EXAMPLE product', 'size':'1x1 "'}
-'''
 def get_product_info(item_id, verbose):
+    '''
+    Gets the product color, description, size, and price
+
+    Inputs:
+        item_id string: The item id
+
+    Returns: A dict with the product info
+        e.g.
+        {
+            'item_id':'01234567',
+            'price':229.0,
+            'color':'white',
+            'description':'EXAMPLE product',
+            'size':'1x1 "'
+         }
+    '''
     global product_info
 
     # If we already got info for this product, return it
@@ -94,31 +133,33 @@ def get_product_info(item_id, verbose):
         if prod['item_id'] == item_id:
             return prod
 
-    url = "{}{}{}".format(product_base_url,item_id,product_url_suffix)
+    url = "{}{}{}".format(product_base_url, item_id, product_url_suffix)
     data = urllib.request.urlopen(url).read()
     data = xml.parse(data)
     # pretty_print(data)
 
     try:
         item = data['ir:ikea-rest']['products']['product']['items']['item']
-    
         item_info = {}
         item_info['item_id'] = item_id
 
         # pricing
-        item_info['price'] = float(item['prices']['normal']['priceNormal']['@unformatted'])
+        item_info['price'] = float(
+            item['prices']['normal']['priceNormal']['@unformatted'])
 
         # description & color
         try:
-            item_info['color'] = item['attributesItems']['attributeItem'][0]['value']
-        except:
+            item_info['color'] = (
+                item['attributesItems']['attributeItem'][0]['value'])
+        except KeyError:
             item_info['color'] = ''
         item_info['description'] = item['name'] + ' ' + item['facts']
 
         # size
         try:
-            item_info['size'] = item['attributesItems']['attributeItem'][1]['value']
-        except:
+            item_info['size'] = (
+                item['attributesItems']['attributeItem'][1]['value'])
+        except KeyError:
             item_info['size'] = ''
         if verbose:
             print('\nProduct', item_info['item_id'], item_info['description'])
@@ -132,23 +173,32 @@ def get_product_info(item_id, verbose):
             error = data['ir:ikea-rest']['products']['error']
             errorcode = error['@code']
             errormsg = error['message']
-            print(colored('\nError: ' + errormsg + ', Code: ' + errorcode + ', Item: ' + item_id, 'red'))
-        except:
-            print(colored('\nError: ' + e + ' for product: ' + item_id, 'red'))
+            print(colored(
+                    '\nError: ' + errormsg
+                    + ', Code: ' + errorcode
+                    + ', Item: ' + item_id,
+                    'red'
+                    ))
+        except KeyError:
+            print(colored(
+                    '\nError: ' + e
+                    + ' for product: ' + item_id,
+                    'red'
+                   ))
 
         print(colored('\nQuitting.', 'red'))
         quit()
 
-    
-'''
-For a specified product ID, gets stock info at the requested stores
 
-Input:
-    item_id string: The item ID
-
-Returns: a list of dictionaries containing item availability
-'''
 def get_product_availability(item_id, verbose):
+    '''
+    For a specified product ID, gets stock info at the requested stores
+
+    Input:
+        item_id string: The item ID
+
+    Returns: a list of dictionaries containing item availability
+    '''
     global product_availability
 
     # If we already got availability for this product, return it
@@ -173,7 +223,7 @@ def get_product_availability(item_id, verbose):
                 # Store ID and name
                 store_dict['store_id'] = id
                 store_dict['store_name'] = get_store_name(id)
-                
+
                 # basic availability info
                 store_dict['item_id'] = item_id
                 store_dict['available'] = int(stock['availableStock'])
@@ -183,7 +233,8 @@ def get_product_availability(item_id, verbose):
                     except KeyError:
                         store_dict['restorDate'] = "N/A"
                 store_dict['probability'] = stock['inStockProbabilityCode']
-                store_dict['isMultiProduct'] = str_to_bool(stock['isMultiProduct'])
+                store_dict['isMultiProduct'] = str_to_bool(
+                    stock['isMultiProduct'])
 
                 # item location(s)
                 loc = stock['findItList']['findIt']
@@ -210,9 +261,11 @@ def get_product_availability(item_id, verbose):
                 confcolor = color_confidence(store_dict['probability'])
                 if verbose:
                     print('At store: {}\n'.format(store_dict['store_name'])
-                            + 'Qty: {}\n'.format(colored(store_dict['available'], confcolor))
-                            + 'In-Stock Confidence: {}\n'.format(colored(store_dict['probability'], confcolor))
-                    )
+                          + 'Qty: {}\n'.format(colored(
+                              store_dict['available'], confcolor))
+                          + 'In-Stock Confidence: {}\n'.format(colored(
+                              store_dict['probability'], confcolor))
+                          )
                     if store_dict['available'] == 0:
                         try:
                             restock_date = store_dict['restockDate']
@@ -222,11 +275,17 @@ def get_product_availability(item_id, verbose):
                             print('Forecast:')
                             try:
                                 for f in store_dict['forecast']:
-                                    confcolor = color_confidence(f['inStockProbabilityCode'])
-                                    print(f['validDate'], 'Qty:', colored(f['availableStock'], confcolor), 'Confidence:', colored(f['inStockProbabilityCode']))
+                                    confcolor = (
+                                        color_confidence(
+                                            f['inStockProbabilityCode']))
+                                    print(f['validDate'],
+                                          'Qty:',
+                                          colored(f['availableStock'],
+                                                  confcolor),
+                                          'Confidence:',
+                                          colored(f['inStockProbabilityCode']))
                             except KeyError:
-                                    print("Item no longer in catalog!")
-
+                                print("Item no longer in catalog!")
 
     # Save for later
     product_availability.append(out)
@@ -234,14 +293,14 @@ def get_product_availability(item_id, verbose):
     return out
 
 
-'''
-Assigns Green/Yellow/Red colors to in-stock probability values
-
-Input: The in-stock probability
-
-Returns: A color for use by the colored library
-'''
 def color_confidence(probability):
+    '''
+    Assigns Green/Yellow/Red colors to in-stock probability values
+
+    Input: The in-stock probability
+
+    Returns: A color for use by the colored library
+    '''
     if probability == 'HIGH':
         return 'green'
     elif probability == 'MEDIUM':
@@ -250,15 +309,15 @@ def color_confidence(probability):
         return 'red'
 
 
-'''
-Gets an item's location within the store
-
-Inputs: 
-    item dict: The dictionary containing the item
-
-Returns: A dict with the item location
-'''
 def get_item_location(item):
+    '''
+    Gets an item's location within the store
+
+    Inputs:
+        item dict: The dictionary containing the item
+
+    Returns: A dict with the item location
+    '''
     item_dict = {}
     item_dict['partNumber'] = item['partNumber']
     item_dict['qty'] = int(item['quantity'])
@@ -269,47 +328,47 @@ def get_item_location(item):
         item_dict['location'] = 'Warehouse ' + aisle + '-' + bin
     elif item['type'] == 'CONTACT_STAFF':
         item_dict['location'] = 'Contact Staff'
-    elif item['type'] == 'SPECIALITY_SHOP':
-        item_dict['location'] = item['specialityShop'] + ' Dept.'
+    elif item['type'] == 'SPECIALTY_SHOP':
+        item_dict['location'] = item['specialtyShop'] + ' Dept.'
     else:
         item_dict['location'] = item['type']
-    
+
     return item_dict
 
 
-'''
-Converts a 'true' or 'false' string to boolean
-
-Input:
-    s: The string to convert
-
-Returns: the boolean value
-'''
 def str_to_bool(s):
+    '''
+    Converts a 'true' or 'false' string to boolean
+
+    Input:
+        s: The string to convert
+
+    Returns: the boolean value
+    '''
     if s == 'true':
-         return True
+        return True
     elif s == 'false':
-         return False
+        return False
     else:
-         raise ValueError
+        raise ValueError
 
 
-'''
-Pretty prints dictionaries
-
-Input:
-    data dict: The dictionary to pretty print
-'''
 def pretty_print(data):
+    '''
+    Pretty prints dictionaries
+
+    Input:
+        data dict: The dictionary to pretty print
+    '''
     print(json.dumps(data, indent=1))
 
 
-'''
-Loads and parses all products
-
-Returns [dict]: A list of products
-'''
 def load_parse_all_products(items, verbose):
+    '''
+    Loads and parses all products
+
+    Returns [dict]: A list of products
+    '''
     products = []
     for item in items:
         # Get product info
@@ -319,21 +378,21 @@ def load_parse_all_products(items, verbose):
         product['notes'] = item['notes']
         product['info'] = get_product_info(item['id'], verbose)
         product['availability'] = get_product_availability(item['id'], verbose)
-        
+
         products.append(product)
 
     return products
 
 
-'''
-Computes the total price of the list
-
-Inputs:
-    products [dict]: The list of products
-
-Returns float: The total price
-'''
 def calc_total_price(products):
+    '''
+    Computes the total price of the list
+
+    Inputs:
+        products [dict]: The list of products
+
+    Returns float: The total price
+    '''
     total_price = 0.0
 
     for prod in products:
@@ -342,13 +401,13 @@ def calc_total_price(products):
     return total_price
 
 
-'''
-Determines the in-stock probability for the entire list by store
-
-Returns:
-    The stock confidence for each store
-'''
 def get_stock_confidence(products):
+    '''
+    Determines the in-stock probability for the entire list by store
+
+    Returns:
+        The stock confidence for each store
+    '''
     confidence = []
     for store in store_ids:
         store_dict = {}
@@ -367,20 +426,21 @@ def get_stock_confidence(products):
                         store['confidence'] = 'LOW'
             elif confidence == 'MEDIUM':
                 for store in confidence:
-                    if store['id'] == store_id and store['confidence'] != 'LOW':
+                    if store['id'] == store_id and \
+                       store['confidence'] != 'LOW':
                         store['confidence'] = 'MEDIUM'
 
     return confidence
 
 
-'''
-Saves rows (list of lists) as a CSV file
-
-Inputs: 
-    filename string: The filename
-    rows [[]]: The data to save
-'''
 def save_file(filename, rows):
+    '''
+    Saves rows (list of lists) as a CSV file
+
+    Inputs:
+        filename string: The filename
+        rows [[]]: The data to save
+    '''
     with open(filename, 'w', newline='') as myfile:
         wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
         for row in rows:
@@ -388,10 +448,10 @@ def save_file(filename, rows):
     print('\nSaved file', filename)
 
 
-'''
-Gets product info and availability and exports to CSV files
-'''
 def save_product_availability(products, verbose):
+    '''
+    Gets product info and availability and exports to CSV files
+    '''
     total_price = calc_total_price(products)
     stock_confidence = get_stock_confidence(products)
     # pretty_print(products)
@@ -413,7 +473,20 @@ def save_product_availability(products, verbose):
         rows.append(['Total Price', total_price])
         rows.append(['\n'])
 
-        rows.append(['Part Number', 'Description', 'Location', 'Qty Needed', 'Qty Available', 'In-Stock Confidence', 'Color', 'Size', 'Unit Price', 'Notes'])
+        rows.append(
+                    [
+                        'Part Number',
+                        'Description',
+                        'Location',
+                        'Qty Needed',
+                        'Qty Available',
+                        'In-Stock Confidence',
+                        'Color',
+                        'Size',
+                        'Unit Price',
+                        'Notes'
+                    ]
+            )
 
         for prod in products:
             for avail in prod['availability']:
@@ -422,7 +495,8 @@ def save_product_availability(products, verbose):
 
                     if not avail['isMultiProduct']:
                         # Not a multi-part product
-                        num_items = avail['locations'][0]['qty'] * prod['qty_needed']
+                        num_items = (
+                            avail['locations'][0]['qty'] * prod['qty_needed'])
                         total_items = total_items + num_items
 
                         notes0 = prod['notes']
@@ -469,8 +543,9 @@ def save_product_availability(products, verbose):
 
                             notes2 = 'Part of ' + prod['id']
 
-                            info = get_product_info(loc['partNumber'])
-                            avail = get_product_availability(loc['partNumber'], verbose)
+                            info = get_product_info(loc['partNumber'], verbose)
+                            avail = get_product_availability(loc['partNumber'],
+                                                             verbose)
                             for thisstore in avail:
                                 if thisstore['store_id'] == store:
                                     avail = thisstore
@@ -501,10 +576,12 @@ def save_product_availability(products, verbose):
 
 
 def get(items, verbose):
+    load_store_names(verbose)
     products = load_parse_all_products(items, verbose)
     save_product_availability(products, verbose)
 
 
 if __name__ == "__main__":
+    load_store_names(verbose=True)
     items = load_input_CSV('../in.csv')
     get(items, verbose=True)

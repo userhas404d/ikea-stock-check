@@ -30,12 +30,11 @@ def get_items(soup):
                             item['Notes'] = td.div.contents[0].string
                     except KeyError:
                         continue
-                if item: 
+                if item:
                     results.append(item)
         return results
     except AttributeError:
         print("ERROR - Expected contents not found in the provided file.")
-
 
 
 def write_file(file_name, contents):
