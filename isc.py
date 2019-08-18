@@ -46,9 +46,9 @@ def config(verbose, store_list, country, language):
     formatted_store_list = store_list.split(',')
 
     valid_stores = []
-    complete_store_list = stores.get_ids(loc=country, store_map="stores.json")
+    ikea_stores = stores.IkeaStores(country_code=country)
     for store in formatted_store_list:
-        if store in complete_store_list:
+        if ikea_stores.is_valid_store(store):
             valid_stores.append(store)
 
     if not valid_stores:
@@ -59,7 +59,7 @@ def config(verbose, store_list, country, language):
     else:
         config['CONFIG']['IKEA_STORES'] = json.dumps(valid_stores)
         if verbose:
-            click.echo("\nThe following Env vars have been set \n\n"
+            click.echo("\nThe following information has been populated \n\n"
                        + "IKEA_COUNTRY_CODE: {}\n".format(country)
                        + "IKEA_LANG_CODE: {}\n".format(language)
                        + "IKEA_STORES: {}\n".format(json.dumps(valid_stores))
@@ -79,10 +79,14 @@ def get_stores(country):
     Prints a list of stores for the target country.
     """
 
-    store_map = "stores.json"
-    country_codes = stores.list_country_codes(store_map)
+    ikea_stores = stores.IkeaStores(store_map='stores.json',
+                                    country_code=country)
 
-    if country not in country_codes:
+    if ikea_stores.is_valid_country_code(country):
+        click.echo(
+            json.dumps(ikea_stores.get(),
+                       indent=4, sort_keys=True))
+    else:
         click.echo('\nERROR - country code:'
                    + '{} is not a valid country code.\n'.format(country))
         click.echo('Check your country code by'
@@ -90,10 +94,6 @@ def get_stores(country):
         click.echo("For example, in the U.S. the URL is"
                    + "https://www.ikea.com/us/en/"
                    + "and the country code is \'us\'\n")
-    else:
-        click.echo(
-            json.dumps(stores.get(loc=country, store_map=store_map),
-                       indent=4, sort_keys=True))
 
 
 @main.command()
@@ -162,7 +162,7 @@ def add_to_shopping_list(verbose, config_path, stock_list):
 
     item_list = check_stock.load_input_CSV(stock_list)
     try:
-        if not add_to_list.add_all(item_list, config, verbose):
+        if not add_to_list.add_all(item_list, verbose):
             click.echo('\nERROR: Error ocurred server side'
                        + 'when adding item to list. \nPlease confirm'
                        + ' the values in config.ini are correct\n')

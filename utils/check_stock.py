@@ -1,4 +1,3 @@
-import configparser
 import csv
 import json
 
@@ -7,63 +6,33 @@ import xmltodict as xml
 
 from termcolor import colored
 
+from utils import load_config
+
 
 # load the config
-config = configparser.ConfigParser()
-config.read('../config.ini')
-try:
-    store_ids = config['CONFIG']['IKEA_STORES']
-except KeyError:
-    store_ids = [215, 211]
-try:
-    country_code = config['CONFIG']['IKEA_COUNTRY_CODE']
-except KeyError:
-    country_code = 'us'
-try:
-    language_code = config['CONFIG']['IKEA_LANG_CODE']
-except KeyError:
-    language_code = 'en'
+ISC_CONFIG = load_config.isc_config().get()
 
 
 # set defaults
-availability_base_url = ('https://www.ikea.com/'
-                         + '{}'.format(country_code)
-                         + '/'
-                         + '{}'.format(language_code)
-                         + '/iows/catalog/availability/'
-                         )
-product_base_url = ('https://www.ikea.com/{}/'.format(country_code)
-                    + '{}/catalog/products/'.format(language_code)
-                    )
-product_url_suffix = ('?version=v1&type=xml&dataset=normal,'
-                      + 'prices,parentCategories,allImages,attributes')
+PRODUCT_URL_SUFFIX = (
+    '?version=v1&type=xml&dataset=normal,'
+    'prices,parentCategories,allImages,attributes'
+    )
 
+PRODUCT_BASE_URL = (
+    'https://www.ikea.com/{}/'.format(ISC_CONFIG['country_code'])
+    + '{}/catalog/products/'.format(ISC_CONFIG['language_code'])
+    )
 
-store_names = []
-product_info = []
-product_availability = []
+AVAILABILITY_BASE_URL = (
+    'https://www.ikea.com/{}'.format(ISC_CONFIG['country_code'])
+    + '/{}'.format(ISC_CONFIG['language_code'])
+    + '/iows/catalog/availability/'
+    )
 
-
-def load_store_names(verbose):
-    '''
-    Reads the preferred store codes and country/language codes
-    '''
-
-    # Get the store names
-    with open('stores.json', encoding='utf8') as f:
-        data = json.load(f)
-
-        global store_names
-
-        for i in store_ids:
-            for d in data:
-                if int(d['buCode']) == i:
-                    store_names.append({'id': i, 'name': d['name']})
-
-    if verbose:
-        print('Searching at the following store(s):')
-        for n in store_names:
-            print(n['name'] + ' (' + str(n['id']) + ')')
+PRODUCT_INFO = []
+PRODUCT_AVAILABILITY = []
+NOT_PUBLISHED = []
 
 
 def get_store_name(store_id):
@@ -75,7 +44,7 @@ def get_store_name(store_id):
 
     Returns: The store name
     '''
-    for n in store_names:
+    for n in ISC_CONFIG['store_names']:
         if n['id'] == store_id:
             return n['name']
 
@@ -119,24 +88,27 @@ def get_product_info(item_id, verbose):
     Returns: A dict with the product info
         e.g.
         {
-            'item_id':'01234567',
-            'price':229.0,
-            'color':'white',
-            'description':'EXAMPLE product',
-            'size':'1x1 "'
+            'item_id': '01234567',
+            'price': 229.0,
+            'color': 'white',
+            'description': 'EXAMPLE product',
+            'size': '1x1'
          }
     '''
-    global product_info
 
     # If we already got info for this product, return it
-    for prod in product_info:
+    for prod in PRODUCT_INFO:
         if prod['item_id'] == item_id:
             return prod
 
-    url = "{}{}{}".format(product_base_url, item_id, product_url_suffix)
-    data = urllib.request.urlopen(url).read()
-    data = xml.parse(data)
-    # pretty_print(data)
+    url = "{}{}{}".format(PRODUCT_BASE_URL, item_id, PRODUCT_URL_SUFFIX)
+    try:
+        data = urllib.request.urlopen(url).read()
+        data = xml.parse(data)
+    except urllib.error.HTTPError as e:
+        print('\nError encountered when querying url: {}\n'.format(url))
+        print(e)
+        # pretty_print(data)
 
     try:
         item = data['ir:ikea-rest']['products']['product']['items']['item']
@@ -151,7 +123,7 @@ def get_product_info(item_id, verbose):
         try:
             item_info['color'] = (
                 item['attributesItems']['attributeItem'][0]['value'])
-        except KeyError:
+        except:
             item_info['color'] = ''
         item_info['description'] = item['name'] + ' ' + item['facts']
 
@@ -159,13 +131,16 @@ def get_product_info(item_id, verbose):
         try:
             item_info['size'] = (
                 item['attributesItems']['attributeItem'][1]['value'])
-        except KeyError:
+        except:
             item_info['size'] = ''
         if verbose:
-            print('\nProduct', item_info['item_id'], item_info['description'])
+            print(
+                '\nRetrived info for product: ',
+                item_info['item_id'],
+                item_info['description'])
 
         # Save for later
-        product_info.append(item_info)
+        PRODUCT_INFO.append(item_info)
 
         return item_info
     except KeyError as e:
@@ -179,15 +154,17 @@ def get_product_info(item_id, verbose):
                     + ', Item: ' + item_id,
                     'red'
                     ))
-        except KeyError:
+            NOT_PUBLISHED.append(item_id)
+            return False
+        except:
             print(colored(
                     '\nError: ' + e
                     + ' for product: ' + item_id,
                     'red'
                    ))
 
-        print(colored('\nQuitting.', 'red'))
-        quit()
+        # print(colored('\nQuitting.', 'red'))
+        # quit()
 
 
 def get_product_availability(item_id, verbose):
@@ -199,14 +176,16 @@ def get_product_availability(item_id, verbose):
 
     Returns: a list of dictionaries containing item availability
     '''
-    global product_availability
 
     # If we already got availability for this product, return it
-    for prod in product_availability:
-        if prod[0]['item_id'] == item_id:
-            return prod
+    for prod in PRODUCT_AVAILABILITY:
+        try:
+            if prod[0]['item_id'] == item_id:
+                return prod
+        except IndexError:
+            continue
 
-    url = availability_base_url + item_id
+    url = AVAILABILITY_BASE_URL + item_id
     data = urllib.request.urlopen(url).read()
     data = xml.parse(data)
     availability = data['ir:ikea-rest']['availability']['localStore']
@@ -214,9 +193,9 @@ def get_product_availability(item_id, verbose):
 
     out = []
 
-    for id in store_ids:
+    for id in ISC_CONFIG['store_ids']:
         for store in availability:
-            if int(store['@buCode']) == id:
+            if store['@buCode'] == id:
                 store_dict = {}
                 stock = store['stock']
 
@@ -231,10 +210,11 @@ def get_product_availability(item_id, verbose):
                     try:
                         store_dict['restockDate'] = stock['restockDate']
                     except KeyError:
-                        store_dict['restorDate'] = "N/A"
+                        store_dict['restockDate'] = None
                 store_dict['probability'] = stock['inStockProbabilityCode']
-                store_dict['isMultiProduct'] = str_to_bool(
-                    stock['isMultiProduct'])
+                store_dict['isMultiProduct'] = (
+                    str_to_bool(stock['isMultiProduct'])
+                    )
 
                 # item location(s)
                 loc = stock['findItList']['findIt']
@@ -251,44 +231,48 @@ def get_product_availability(item_id, verbose):
 
                 # forecast
                 try:
-                    store_dict['forecast'] = stock['forecasts']['forcast']
+                    if store_dict['restockDate']:
+                        store_dict['forecast'] = stock['forecasts']['forcast']
+                    else:
+                        store_dict['forecast'] = None
                 except KeyError:
-                    store_dict['forcast'] = None
+                    store_dict['restockDate'] = 'N/A'
 
                 out.append(store_dict)
 
                 # print the status to the terminal
                 confcolor = color_confidence(store_dict['probability'])
-                if verbose:
-                    print('At store: {}\n'.format(store_dict['store_name'])
-                          + 'Qty: {}\n'.format(colored(
-                              store_dict['available'], confcolor))
-                          + 'In-Stock Confidence: {}\n'.format(colored(
-                              store_dict['probability'], confcolor))
-                          )
-                    if store_dict['available'] == 0:
-                        try:
-                            restock_date = store_dict['restockDate']
-                        except KeyError:
-                            restock_date = "N/A"
-                            print('Restock date: {}'.format(restock_date))
+                print(
+                    'At store:', store_dict['store_name'],
+                    'Qty:', colored(store_dict['available'], confcolor),
+                    'In-Stock Confidence:',
+                    colored(store_dict['probability'], confcolor))
+                if store_dict['available'] == 0:
+                    print('Restock date:', store_dict['restockDate'])
+                    if store_dict['forecast']:
+                        for f in store_dict['forecast']:
+                            confcolor = (
+                                color_confidence(f['inStockProbabilityCode'])
+                                )
                             print('Forecast:')
-                            try:
-                                for f in store_dict['forecast']:
-                                    confcolor = (
-                                        color_confidence(
-                                            f['inStockProbabilityCode']))
-                                    print(f['validDate'],
-                                          'Qty:',
-                                          colored(f['availableStock'],
-                                                  confcolor),
-                                          'Confidence:',
-                                          colored(f['inStockProbabilityCode']))
-                            except KeyError:
-                                print("Item no longer in catalog!")
+                            print(
+                                f['validDate'],
+                                'Qty:',
+                                colored(f['availableStock'], confcolor),
+                                'Confidence:',
+                                colored(f['inStockProbabilityCode'])
+                                )
+                    else:
+                        print(
+                            'Forecast:',
+                            colored(
+                                'No estimated restock date availabile',
+                                confcolor
+                                )
+                            )
 
     # Save for later
-    product_availability.append(out)
+    PRODUCT_AVAILABILITY.append(out)
 
     return out
 
@@ -369,6 +353,7 @@ def load_parse_all_products(items, verbose):
 
     Returns [dict]: A list of products
     '''
+
     products = []
     for item in items:
         # Get product info
@@ -376,8 +361,15 @@ def load_parse_all_products(items, verbose):
         product['id'] = item['id']
         product['qty_needed'] = item['qty']
         product['notes'] = item['notes']
-        product['info'] = get_product_info(item['id'], verbose)
-        product['availability'] = get_product_availability(item['id'], verbose)
+        item_info = get_product_info(item['id'], verbose)
+        if item_info:
+            product['info'] = item_info
+            product['availability'] = (
+                get_product_availability(item['id'], verbose)
+                )
+        else:
+            product['info'] = "Not available"
+            product['availability'] = "Not available"
 
         products.append(product)
 
@@ -409,7 +401,7 @@ def get_stock_confidence(products):
         The stock confidence for each store
     '''
     confidence = []
-    for store in store_ids:
+    for store in ISC_CONFIG['store_ids']:
         store_dict = {}
         store_dict['id'] = store
         store_dict['confidence'] = 'HIGH'
@@ -456,7 +448,7 @@ def save_product_availability(products, verbose):
     stock_confidence = get_stock_confidence(products)
     # pretty_print(products)
 
-    for store in store_ids:
+    for store in ISC_CONFIG['store_ids']:
         rows = []
 
         total_items = 0
@@ -544,8 +536,12 @@ def save_product_availability(products, verbose):
                             notes2 = 'Part of ' + prod['id']
 
                             info = get_product_info(loc['partNumber'], verbose)
-                            avail = get_product_availability(loc['partNumber'],
-                                                             verbose)
+                            avail = (
+                                      get_product_availability(
+                                          loc['partNumber'],
+                                          verbose
+                                        )
+                                    )
                             for thisstore in avail:
                                 if thisstore['store_id'] == store:
                                     avail = thisstore
@@ -576,12 +572,13 @@ def save_product_availability(products, verbose):
 
 
 def get(items, verbose):
-    load_store_names(verbose)
     products = load_parse_all_products(items, verbose)
+    # remove items that are no longer available
+    for item in NOT_PUBLISHED:
+        products = list(filter(lambda i: i['id'] != item, products))
     save_product_availability(products, verbose)
 
 
 if __name__ == "__main__":
-    load_store_names(verbose=True)
     items = load_input_CSV('../in.csv')
     get(items, verbose=True)
